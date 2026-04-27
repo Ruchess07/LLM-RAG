@@ -1,0 +1,450 @@
+# Install if needed
+install.packages("nnet")
+
+# Load library
+library(nnet)
+
+# Load dataset
+data(iris)
+
+# View structure
+str(iris)
+
+
+# Normalize features (important!)
+normalize <- function(x) {
+  (x - min(x)) / (max(x) - min(x))
+}
+
+iris_norm <- as.data.frame(lapply(iris[,1:4], normalize))
+iris_norm$Species <- iris$Species
+
+##tRAIN AND TEST
+
+set.seed(123)
+
+index <- sample(1:nrow(iris_norm), 0.7*nrow(iris_norm))
+
+train <- iris_norm[index, ]
+test  <- iris_norm[-index, ]
+
+#MODEL 
+model <- nnet(
+  Species ~ ., 
+  data = train,
+  size = 10,        # hidden neurons
+  maxit = 200,      # iterations
+  trace = FALSE
+)
+
+#size = 10 = number of neurons in the single hidden layer
+
+##PREDICTIONS
+pred <- predict(model, test, type = "class")
+
+#eVALUATE
+# Confusion matrix
+table(Predicted = pred, Actual = test$Species)
+
+# Accuracy
+accuracy <- mean(pred == test$Species)
+accuracy
+
+###iMPORTANT LIMITATION
+#Only 1 hidden layer
+#Not scalable for big data
+# No modern deep learning features
+
+
+
+######################################################################################################
+###Simple LLM-style text processing
+
+install.packages("tm")
+library(tm)
+
+# Create corpus
+corpus <- VCorpus(VectorSource(data$text))
+
+# Clean text
+corpus <- tm_map(corpus, content_transformer(tolower))
+corpus <- tm_map(corpus, removePunctuation)
+corpus <- tm_map(corpus, removeNumbers)
+corpus <- tm_map(corpus, removeWords, stopwords("en"))
+
+# Create Document-Term Matrix
+dtm <- DocumentTermMatrix(corpus)
+
+# Convert to matrix
+matrix_data <- as.matrix(dtm)
+
+print(matrix_data)
+
+#Simple LLM-like prediction idea (We use a simple classifier instead of a real LLM)
+
+ install.packages("e1071")
+library(e1071)
+
+# Train a naive Bayes model
+model <- naiveBayes(matrix_data, as.factor(data$label))
+
+# Predict on training data
+pred <- predict(model, matrix_data)
+
+print(pred)
+
+
+
+###################Simple Rule-Based Chatbot
+chatbot_response <- function(input) {
+  input <- tolower(input)
+
+  if (grepl("hello|hi|hey", input)) {
+    return("Hello! How can I help you today?")
+  } 
+  else if (grepl("your name", input)) {
+    return("I am a simple R chatbot 🤖")
+  } 
+  else if (grepl("help", input)) {
+    return("You can ask me about greetings, my name, or type 'bye' to exit.")
+  } 
+  else if (grepl("bye|exit|quit", input)) {
+    return("Goodbye! Have a nice day 👋")
+  } 
+  else {
+    return("Sorry, I don't understand that yet.")
+  }
+}
+
+# Start chatbot loop
+cat("Chatbot: Hello! Type something (type 'bye' to stop)\n")
+
+repeat {
+  user_input <- readline("You: ")
+  response <- chatbot_response(user_input)
+  cat("Bot:", response, "\n")
+
+  if (tolower(user_input) %in% c("bye", "exit", "quit")) {
+    break
+  }
+}
+
+#LLM-Powered Chatbot in R (OpenAI API)
+#Step 1: Install package
+install.packages("httr")
+install.packages("jsonlite")
+
+#Step 2: Chatbot code
+chat_with_llm <- function(user_text) {
+
+  response <- POST(
+    url = "https://api.openai.com/v1/chat/completions",
+    add_headers(
+      Authorization = paste("Bearer", api_key),
+      "Content-Type" = "application/json"
+    ),
+    body = toJSON(list(
+      model = "gpt-4o-mini",
+      messages = list(
+        list(role = "system", content = "You are a helpful R chatbot."),
+        list(role = "user", content = user_text)
+      )
+    ), auto_unbox = TRUE)
+  )
+
+  result <- content(response, as = "parsed", type = "application/json")
+  return(result$choices[[1]]$message$content)
+}
+
+#Step 3: Run chatbot loop
+cat("R LLM Chatbot started (type 'exit' to stop)\n")
+
+repeat {
+  user_input <- readline("You: ")
+
+  if (tolower(user_input) == "exit") {
+    cat("Bot: Goodbye!\n")
+    break
+  }
+
+  bot_reply <- chat_with_llm(user_input)
+  cat("Bot:", bot_reply, "\n")
+}
+
+
+######################################################RAG EXAMPLE
+
+install.packages("tm")
+install.packages("text2vec")
+install.packages("dplyr")
+install.packages("stringr")
+
+library(tm)
+library(text2vec)
+library(dplyr)
+library(stringr)
+
+##DATA 
+docs <- data.frame(
+  doc_id = 1:5,
+  text = c(
+    "R is a programming language used for statistics and data analysis.",
+    "Python is widely used in machine learning and artificial intelligence.",
+    "R supports packages like ggplot2 for data visualization.",
+    "Machine learning involves training models on data to make predictions.",
+    "Data science combines statistics, programming, and domain knowledge."
+  ),
+  stringsAsFactors = FALSE
+)
+
+docs
+
+#Text Preprocessing
+corpus <- VCorpus(VectorSource(docs$text))
+
+corpus <- corpus %>%
+  tm_map(content_transformer(tolower)) %>%
+  tm_map(removePunctuation) %>%
+  tm_map(removeNumbers) %>%
+  tm_map(removeWords, stopwords("en")) %>%
+  tm_map(stripWhitespace)
+
+##Convert Text → TF-IDF Matrix (Embeddings)
+dtm <- DocumentTermMatrix(corpus)
+
+tfidf <- weightTfIdf(dtm)
+matrix <- as.matrix(tfidf)
+##we have vector representations of documents.
+
+#Define Query Function (RAG Retrieval Step: We convert the query into the same vector space and compute similarity.
+cosine_similarity <- function(a, b) {
+  sum(a * b) / (sqrt(sum(a * a)) * sqrt(sum(b * b)))
+}
+
+#RAG Retrieval Function
+retrieve_docs <- function(query, matrix, docs, top_k = 2) {
+  
+  # preprocess query
+  query_corpus <- VCorpus(VectorSource(query)) %>%
+    tm_map(content_transformer(tolower)) %>%
+    tm_map(removePunctuation) %>%
+    tm_map(removeNumbers) %>%
+    tm_map(removeWords, stopwords("en")) %>%
+    tm_map(stripWhitespace)
+  
+  query_dtm <- DocumentTermMatrix(query_corpus, control = list(dictionary = Terms(dtm)))
+  query_vec <- as.matrix(query_dtm)
+  
+  # compute similarity
+  scores <- apply(matrix, 1, function(x) cosine_similarity(x, query_vec))
+  
+  # rank results
+  top_idx <- order(scores, decreasing = TRUE)[1:top_k]
+  
+  return(docs[top_idx, ])
+}
+
+#Ask a Question (RAG Query)
+question <- "What is machine learning used for?"
+
+retrieved_docs <- retrieve_docs(question, matrix, docs, top_k = 2)
+
+retrieved_docs
+
+#Generation Step (Mock LLM Answer)
+
+generate_answer <- function(question, retrieved_docs) {
+  
+  context <- paste(retrieved_docs$text, collapse = " ")
+  
+  answer <- paste0(
+    "Question: ", question, "\n\n",
+    "Retrieved Context: ", context, "\n\n",
+    "Final Answer: ",
+    "Based on the retrieved information, machine learning is used for training models on data to make predictions and is widely applied in AI systems."
+  )
+  
+  return(answer)
+}
+
+#Run Full RAG Pipeline
+final_output <- generate_answer(question, retrieved_docs)
+
+cat(final_output)
+
+##############################################################################################################
+#####RAG Chatbot in Shiny (R + OpenAI)
+install.packages(c("shiny", "httr", "jsonlite", "dplyr"))
+library(shiny)
+library(httr)
+library(jsonlite)
+library(dplyr)
+
+#Set API Key
+Sys.setenv(OPENAI_API_KEY = "YOUR_API_KEY_HERE")
+api_key <- Sys.getenv("OPENAI_API_KEY")
+
+#Knowledge Base (Your “Documents”)
+docs <- data.frame(
+  id = 1:5,
+  text = c(
+    "R is used for statistical computing and data visualization.",
+    "Python is widely used in machine learning and AI systems.",
+    "Machine learning enables computers to learn from data patterns.",
+    "Data science combines programming, statistics, and domain knowledge.",
+    "ggplot2 is a popular R package for data visualization."
+  ),
+  stringsAsFactors = FALSE
+)
+
+#OpenAI Embedding Function
+get_embedding <- function(text) {
+  res <- POST(
+    "https://api.openai.com/v1/embeddings",
+    add_headers(
+      Authorization = paste("Bearer", api_key),
+      "Content-Type" = "application/json"
+    ),
+    body = toJSON(list(
+      input = text,
+      model = "text-embedding-3-small"
+    ), auto_unbox = TRUE)
+  )
+  
+  content(res)$data[[1]]$embedding
+}
+
+#Precompute Document Embeddings
+docs$embedding <- lapply(docs$text, get_embedding)
+
+#Cosine Similarity
+cosine <- function(a, b) {
+  sum(a * b) / (sqrt(sum(a * a)) * sqrt(sum(b * b)))
+}
+
+#Retrieval Function (RAG Step)
+retrieve <- function(query, docs, top_k = 2) {
+  
+  q_emb <- get_embedding(query)
+  
+  scores <- sapply(docs$embedding, function(x) cosine(q_emb, x))
+  
+  top_idx <- order(scores, decreasing = TRUE)[1:top_k]
+  
+  docs[top_idx, ]
+}
+
+#GPT Answer Function (Generation Step)
+generate_answer <- function(question, context_docs) {
+  
+  context <- paste(context_docs$text, collapse = "\n")
+  
+  prompt <- paste0(
+    "Use the context to answer the question.\n\n",
+    "Context:\n", context, "\n\n",
+    "Question: ", question, "\n",
+    "Answer:"
+  )
+  
+  res <- POST(
+    "https://api.openai.com/v1/chat/completions",
+    add_headers(
+      Authorization = paste("Bearer", api_key),
+      "Content-Type" = "application/json"
+    ),
+    body = toJSON(list(
+      model = "gpt-4o-mini",
+      messages = list(
+        list(role = "user", content = prompt)
+      ),
+      temperature = 0.2
+    ), auto_unbox = TRUE)
+  )
+  
+  content(res)$choices[[1]]$message$content
+}
+
+#sHINY UI
+ui <- fluidPage(
+  titlePanel("RAG Chatbot (R + OpenAI)"),
+
+  sidebarLayout(
+    sidebarPanel(
+      textInput("question", "Ask a question:", ""),
+      actionButton("ask", "Ask")
+    ),
+
+    mainPanel(
+      h4("Answer"),
+      verbatimTextOutput("answer"),
+
+      h4("Retrieved Context"),
+      verbatimTextOutput("context")
+    )
+  )
+)
+
+#Server Logic (RAG Pipeline)
+server <- function(input, output, session) {
+
+  result <- eventReactive(input$ask, {
+
+    req(input$question)
+
+    # Step 1: Retrieve relevant docs
+    retrieved <- retrieve(input$question, docs, top_k = 2)
+
+    # Step 2: Generate answer using GPT
+    answer <- generate_answer(input$question, retrieved)
+
+    list(
+      answer = answer,
+      context = paste(retrieved$text, collapse = "\n")
+    )
+  })
+
+  output$answer <- renderText({
+    req(result())
+    result()$answer
+  })
+
+  output$context <- renderText({
+    req(result())
+    result()$context
+  })
+}
+
+#Run the App
+shinyApp(ui, server)
+
+
+####################
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
